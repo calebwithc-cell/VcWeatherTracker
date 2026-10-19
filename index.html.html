@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#2563eb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Snow Map">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%E2%9D%84%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<title>Snow Hotspots</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--text:#1b2430;--muted:#5d6b7c;--line:#d9e0e8;--acc:#2563eb}
+@media (prefers-color-scheme:dark){:root{--bg:#10151c;--card:#19212b;--text:#e8edf3;--muted:#93a1b2;--line:#2b3644;--acc:#60a5fa}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--text)}
+header{padding:14px 14px 4px}
+h1{margin:0;font-size:20px}
+.sub{color:var(--muted);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:10px 14px;padding:12px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+input,select,button{font:inherit;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+input[type=text]{flex:1;min-width:140px}
+input[type=number]{width:90px}
+button{background:var(--acc);color:#fff;border:0;cursor:pointer}
+button.alt{background:var(--bg);color:var(--text);border:1px solid var(--line)}
+button.on{background:var(--acc);color:#fff}
+#map{height:55vh;min-height:320px;border-radius:12px;border:1px solid var(--line)}
+.legend{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:var(--muted)}
+.bar{flex:1;height:10px;border-radius:5px;background:linear-gradient(90deg,#bfdbfe,#60a5fa,#8b5cf6,#db2777,#7f1d1d)}
+.spot{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line);cursor:pointer}
+.spot:first-child{border-top:0}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.stats b{display:block;font-size:20px}
+.stats span{font-size:12px;color:var(--muted)}
+#hbars{display:flex;align-items:flex-end;gap:1px;height:90px;margin-top:8px}
+#hbars div{flex:1;background:var(--acc);border-radius:2px 2px 0 0;min-height:1px}
+#hlab{display:flex;gap:1px;font-size:9px;color:var(--muted);text-align:center}
+#hlab span{flex:1}
+#tabs button{flex:1}
+.hide{display:none!important}
+#msg{color:var(--muted);font-size:13px;margin:6px 0 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Snow Hotspots</h1>
+  <div class="sub">Live forecast and recent snowfall, mapped across your area</div>
+</header>
+
+<div class="card"><div class="row" id="tabs"><button data-t="snow" class="on">Snow</button><button data-t="trees" class="alt">Trees</button></div></div>
+
+<div class="card">
+  <div class="row">
+    <input id="place" type="text" placeholder="City or place name">
+    <button id="go">Search</button>
+    <button id="loc" class="alt">Use my location</button>
+    <button id="blk" class="alt">Zoom to blocks here</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label>Radius (miles) <input id="rad" type="number" value="6" min="0.1" max="60" step="0.1"></label>
+    <label>Grid <select id="grid"><option value="5">5×5</option><option value="7">7×7</option><option value="4">4×4</option><option value="10">10×10</option></select></label>
+  </div>
+  <div id="msg">Enter a place or tap “Use my location”.</div>
+</div>
+
+<div class="card">
+  <div class="row snow-only" id="modes">
+    <button data-m="now" class="on">Snow on ground now</button>
+    <button data-m="past" class="alt">Fell past 7 days</button>
+    <button data-m="next" class="alt">Forecast next 7 days</button>
+  </div>
+  <div style="height:10px"></div>
+  <div id="map"></div>
+  <div class="legend snow-only"><span id="lmin">0"</span><div class="bar"></div><span id="lmax">–</span></div>
+</div>
+
+<div class="card snow-only">
+  <div class="stats">
+    <div><b id="sNow">–</b><span>avg on ground</span></div>
+    <div><b id="sPast">–</b><span>avg fell, past 7d</span></div>
+    <div><b id="sNext">–</b><span>avg forecast, 7d</span></div>
+  </div>
+</div>
+
+<div class="card snow-only">
+  <b>Snowfall, past 3 years</b>
+  <div class="sub">At the center of your search area, by month</div>
+  <div id="hist" class="sub" style="margin-top:6px">Search a place to load history.</div>
+  <div id="hbars"></div><div id="hlab"></div>
+</div>
+
+<div class="card snow-only">
+  <b>Top hotspots</b>
+  <div id="spots" class="sub" style="margin-top:6px">Nothing loaded yet.</div>
+</div>
+
+<div class="card tree-only hide">
+  <b>Tree density</b>
+  <div class="sub">Built from trees and woods that volunteers have mapped on OpenStreetMap. Zoom in to about 5 miles across or less, then tap the button.</div>
+  <div class="row" style="margin-top:8px"><button id="tmap">Map trees in this view</button></div>
+  <div id="tinfo" style="margin-top:8px" class="sub">Darker green means more mapped tree cover. Tap a square for details.</div>
+</div>
+
+<div class="card tree-only hide">
+  <div class="row">
+    <label>Trees counted in this area <input id="trees" type="number" min="0" placeholder="0"></label>
+  </div>
+  <div class="sub" style="margin-top:6px">Zoom the map in on satellite view, count the trees once, and enter it here. It is remembered on this device.</div>
+</div>
+
+<div class="sub" style="padding:0 14px 20px">Data: Open-Meteo weather models. Values are modeled for each grid point, not measured on the ground, so small differences between nearby points are expected.</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function(){
+if (typeof L === 'undefined') {
+  document.getElementById('msg').textContent = 'The map could not load. Open this file in Safari or Chrome with internet, not in a preview window.';
+  return;
+}
+window.addEventListener('error', function(e){ document.getElementById('msg').textContent = 'Error: ' + e.message; });
+
+var map = L.map('map').setView([39.5, -98.35], 4);
+var street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '&copy; OpenStreetMap'});
+var sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom: 19, attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'});
+sat.addTo(map);
+L.control.layers({'Satellite': sat, 'Street map': street}, null, {position: 'topright'}).addTo(map);
+var layer = L.layerGroup().addTo(map);
+var cells = [], mode = 'now', center = null;
+var $ = function(id){ return document.getElementById(id); };
+function say(t){ $('msg').textContent = t; }
+function fmt(v){ return (Math.round(v * 10) / 10).toFixed(1) + '"'; }
+
+try { $('trees').value = localStorage.getItem('trees') || ''; } catch(e){}
+$('trees').addEventListener('input', function(){ try { localStorage.setItem('trees', $('trees').value); } catch(e){} });
+
+function color(t){
+  var stops = [[191,219,254],[96,165,250],[139,92,246],[219,39,119],[127,29,29]];
+  var p = Math.min(Math.max(t,0),1) * (stops.length - 1), i = Math.min(Math.floor(p), stops.length - 2), f = p - i;
+  var a = stops[i], b = stops[i+1];
+  return 'rgb(' + [0,1,2].map(function(k){ return Math.round(a[k] + (b[k]-a[k]) * f); }).join(',') + ')';
+}
+
+function geocode(q){
+  return fetch('https://geocoding-api.open-meteo.com/v1/search?count=1&name=' + encodeURIComponent(q))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d.results || !d.results.length) throw new Error('Place not found');
+      var p = d.results[0];
+      return {lat: p.latitude, lon: p.longitude, name: p.name + (p.admin1 ? ', ' + p.admin1 : '')};
+    });
+}
+
+function load(lat, lon, name){
+  center = {lat: lat, lon: lon};
+  var n = parseInt($('grid').value, 10), rad = parseFloat($("rad").value) || 6;
+  var dLat = rad / 69, dLon = rad / (69 * Math.cos(lat * Math.PI / 180));
+  var lats = [], lons = [], pts = [];
+  for (var i = 0; i < n; i++) for (var j = 0; j < n; j++) {
+    var la = lat - dLat + (2 * dLat) * (i + 0.5) / n;
+    var lo = lon - dLon + (2 * dLon) * (j + 0.5) / n;
+    pts.push({lat: la, lon: lo, h: dLat / n, w: dLon / n});
+    lats.push(la.toFixed(4)); lons.push(lo.toFixed(4));
+  }
+  say('Loading snow data for ' + (name || 'your area') + '…');
+  var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lats.join(',') + '&longitude=' + lons.join(',') +
+    '&hourly=snowfall,snow_depth&past_days=7&forecast_days=7&timezone=auto';
+  fetch(url).then(function(r){ return r.json(); }).then(function(d){
+    if (d.error) throw new Error(d.reason || 'API error');
+    var arr = Array.isArray(d) ? d : [d];
+    cells = arr.map(function(o, k){
+      var h = o.hourly, off = o.utc_offset_seconds || 0;
+      var hr = new Date(Date.now() + off * 1000).getUTCHours();
+      var idx = Math.min(168 + hr, h.snowfall.length - 1);
+      var past = 0, next = 0;
+      for (var t = 0; t < h.snowfall.length; t++) { var v = h.snowfall[t] || 0; if (t <= idx) past += v; else next += v; }
+      return {lat: pts[k].lat, lon: pts[k].lon, h: pts[k].h, w: pts[k].w,
+        elev: (o.elevation || 0) * 3.28084, now: (h.snow_depth[idx] || 0) * 39.3701, past: past / 2.54, next: next / 2.54};
+    });
+    say((name || 'Your area') + ': ' + cells.length + ' grid points loaded.');
+    draw(true);
+    loadHistory(lat, lon);
+  }).catch(function(e){ say('Could not load data: ' + e.message); });
+}
+
+
+var MN = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+var MF = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function loadHistory(lat, lon){
+  var box = $('hist');
+  box.textContent = 'Loading 3 years of snowfall…';
+  var end = new Date(Date.now() - 5 * 864e5), start = new Date(end);
+  start.setFullYear(end.getFullYear() - 3);
+  var ds = function(d){ return d.toISOString().slice(0, 10); };
+  var url = 'https://archive-api.open-meteo.com/v1/archive?latitude=' + lat.toFixed(4) + '&longitude=' + lon.toFixed(4) +
+    '&start_date=' + ds(start) + '&end_date=' + ds(end) + '&daily=snowfall_sum&timezone=auto';
+  fetch(url).then(function(r){ return r.json(); }).then(function(d){
+    if (d.error) throw new Error(d.reason || 'API error');
+    var t = d.daily.time, v = d.daily.snowfall_sum, months = [], map = {}, yrs = [0, 0, 0];
+    for (var i = 0; i < t.length; i++) {
+      var inch = (v[i] || 0) / 2.54, key = t[i].slice(0, 7);
+      if (!(key in map)) { map[key] = months.length; months.push({k: key, v: 0}); }
+      months[map[key]].v += inch;
+      var age = Math.floor((end - new Date(t[i])) / (365.25 * 864e5));
+      yrs[Math.min(Math.max(age, 0), 2)] += inch;
+    }
+    var max = Math.max.apply(null, months.map(function(m){ return m.v; })) || 1;
+    var bars = $('hbars'), labs = $('hlab'), best = months[0];
+    bars.innerHTML = ''; labs.innerHTML = '';
+    months.forEach(function(m){
+      if (m.v > best.v) best = m;
+      var b = document.createElement('div');
+      b.style.height = Math.max(m.v / max * 100, 1) + '%';
+      var mo = parseInt(m.k.slice(5), 10) - 1;
+      b.title = MF[mo] + ' ' + m.k.slice(0, 4) + ': ' + fmt(m.v);
+      bars.appendChild(b);
+      var l = document.createElement('span'); l.textContent = MN[mo]; labs.appendChild(l);
+    });
+    var bm = parseInt(best.k.slice(5), 10) - 1;
+    box.innerHTML = '';
+    var lines = [
+      ['Last 12 months', yrs[0]], ['Year before', yrs[1]], ['Two years before', yrs[2]]
+    ];
+    lines.forEach(function(x){
+      var row = document.createElement('div'); row.className = 'spot'; row.style.cursor = 'default';
+      var a = document.createElement('span'); a.textContent = x[0];
+      var b = document.createElement('b'); b.textContent = fmt(x[1]);
+      row.appendChild(a); row.appendChild(b); box.appendChild(row);
+    });
+    var note = document.createElement('div'); note.className = 'sub'; note.style.marginTop = '6px';
+    note.textContent = 'Snowiest month: ' + MF[bm] + ' ' + best.k.slice(0, 4) + ' (' + fmt(best.v) + '). Tap a bar for its month.';
+    box.appendChild(note);
+  }).catch(function(e){ box.textContent = 'Could not load history: ' + e.message; });
+}
+
+function draw(fit){
+  layer.clearLayers();
+  if (!cells.length) return;
+  var vals = cells.map(function(c){ return c[mode]; });
+  var max = Math.max.apply(null, vals), min = Math.min.apply(null, vals);
+  var span = max - min;
+  $('lmin').textContent = fmt(min);
+  $('lmax').textContent = fmt(max);
+  cells.forEach(function(c){
+    var t = span > 0.05 ? (c[mode] - min) / span : 0;
+    var r = L.rectangle([[c.lat - c.h, c.lon - c.w], [c.lat + c.h, c.lon + c.w]],
+      {stroke: false, fillColor: color(t), fillOpacity: 0.45});
+    r.bindPopup('Elevation: ' + Math.round(c.elev) + ' ft<br>On ground: ' + fmt(c.now) + '<br>Past 7d: ' + fmt(c.past) + '<br>Next 7d: ' + fmt(c.next));
+    r.addTo(layer);
+  });
+  if (fit && center) {
+    var b = L.latLngBounds(cells.map(function(c){ return [c.lat, c.lon]; }));
+    map.fitBounds(b.pad(0.2), {maxZoom: 19});
+  }
+  var avg = function(k){ return cells.reduce(function(s, c){ return s + c[k]; }, 0) / cells.length; };
+  $('sNow').textContent = fmt(avg('now'));
+  $('sPast').textContent = fmt(avg('past'));
+  $('sNext').textContent = fmt(avg('next'));
+  var top = cells.slice().sort(function(a, b){ return b[mode] - a[mode]; }).slice(0, 3);
+  var box = $('spots');
+  box.innerHTML = '';
+  if (span <= 0.05 && max < 0.05) { box.textContent = 'No measurable snow in this view.'; return; }
+  top.forEach(function(c, i){
+    var d = document.createElement('div');
+    d.className = 'spot';
+    var a = document.createElement('span'); a.textContent = '#' + (i + 1) + '  ' + c.lat.toFixed(3) + ', ' + c.lon.toFixed(3);
+    var b = document.createElement('b'); b.textContent = fmt(c[mode]);
+    d.appendChild(a); d.appendChild(b);
+    d.onclick = function(){ map.setView([c.lat, c.lon], 14); };
+    box.appendChild(d);
+  });
+}
+
+document.querySelectorAll('#modes button').forEach(function(b){
+  b.onclick = function(){
+    mode = b.dataset.m;
+    document.querySelectorAll('#modes button').forEach(function(x){ x.className = x === b ? 'on' : 'alt'; });
+    draw(false);
+  };
+});
+
+function search(){
+  var q = $('place').value.trim();
+  if (!q) { say('Type a place name first.'); return; }
+  say('Finding ' + q + '…');
+  geocode(q).then(function(p){ load(p.lat, p.lon, p.name); }).catch(function(e){ say(e.message); });
+}
+$('go').onclick = search;
+$('place').addEventListener('keydown', function(e){ if (e.key === 'Enter') search(); });
+$('loc').onclick = function(){
+  if (!navigator.geolocation) { say('Location is not available in this browser.'); return; }
+  say('Getting your location…');
+  navigator.geolocation.getCurrentPosition(
+    function(p){ load(p.coords.latitude, p.coords.longitude, 'your location'); },
+    function(){ say('Location was blocked. Type a place name instead.'); });
+};
+$('blk').onclick = function(){
+  var c = map.getCenter();
+  $('rad').value = 0.25; $('grid').value = '10';
+  load(c.lat, c.lng, 'this spot');
+};
+
+var treeLayer = L.layerGroup(), tab = 'snow';
+function inPoly(x, y, ring){
+  var c = false;
+  for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    var xi = ring[i].lon, yi = ring[i].lat, xj = ring[j].lon, yj = ring[j].lat;
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) c = !c;
+  }
+  return c;
+}
+function green(t){
+  var a = [237,248,233], b = [0,68,27];
+  return 'rgb(' + [0,1,2].map(function(k){ return Math.round(a[k] + (b[k] - a[k]) * Math.min(Math.max(t,0),1)); }).join(',') + ')';
+}
+function mapTrees(){
+  var bd = map.getBounds(), s = bd.getSouth(), w = bd.getWest(), n = bd.getNorth(), e = bd.getEast(), info = $('tinfo');
+  if ((n - s) > 0.1 || (e - w) > 0.15) { info.textContent = 'Zoom in closer first (about 5 miles across or less).'; return; }
+  info.textContent = 'Loading mapped trees…';
+  var bb = [s, w, n, e].join(',');
+  var q = '[out:json][timeout:25];(node["natural"="tree"](' + bb + ');way["natural"="wood"](' + bb + ');way["landuse"="forest"](' + bb + '););out geom;';
+  fetch('https://overpass-api.de/api/interpreter', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'data=' + encodeURIComponent(q)})
+    .then(function(r){ if (!r.ok) throw new Error('map data server busy (' + r.status + '), try again in a minute'); return r.json(); })
+    .then(function(d){
+      var trees = [], polys = [];
+      d.elements.forEach(function(el){
+        if (el.type === 'node') trees.push(el);
+        else if (el.geometry && el.geometry.length > 3) polys.push(el.geometry);
+      });
+      treeLayer.clearLayers();
+      var N = 12, dLat = (n - s) / N, dLon = (e - w) / N;
+      var acres = (dLat * 69) * (dLon * 69 * Math.cos(((n + s) / 2) * Math.PI / 180)) * 640;
+      var any = false;
+      for (var i = 0; i < N; i++) for (var j = 0; j < N; j++) {
+        var s0 = s + i * dLat, w0 = w + j * dLon, cnt = 0, hit = 0;
+        trees.forEach(function(t){ if (t.lat >= s0 && t.lat < s0 + dLat && t.lon >= w0 && t.lon < w0 + dLon) cnt++; });
+        for (var a = 0; a < 4; a++) for (var b2 = 0; b2 < 4; b2++) {
+          var la = s0 + (a + 0.5) / 4 * dLat, lo = w0 + (b2 + 0.5) / 4 * dLon;
+          if (polys.some(function(r){ return inPoly(lo, la, r); })) hit++;
+        }
+        var wood = hit / 16, cover = Math.min(1, wood + cnt * 400 / (acres * 43560));
+        if (cover > 0) any = true;
+        var r = L.rectangle([[s0, w0], [s0 + dLat, w0 + dLon]], {stroke: false, fillColor: green(cover), fillOpacity: cover > 0 ? 0.55 : 0.05, bubblingMouseEvents: false});
+        r.bindPopup('Mapped trees: ' + cnt + '<br>Mapped woodland: ' + Math.round(wood * 100) + '% of square<br>Estimated cover: ' + Math.round(cover * 100) + '%');
+        r.addTo(treeLayer);
+      }
+      info.textContent = trees.length + ' mapped trees and ' + polys.length + ' wooded areas in view.' +
+        (any ? '' : ' Nothing is mapped here yet, which does not mean there are no trees.') +
+        ' Volunteers map unevenly, so empty squares can still have trees. Cover assumes about 400 sq ft per mapped tree.';
+    })
+    .catch(function(err){ info.textContent = 'Could not load tree data: ' + err.message; });
+}
+function setTab(t){
+  tab = t;
+  document.querySelectorAll('.snow-only').forEach(function(e){ e.classList.toggle('hide', t !== 'snow'); });
+  document.querySelectorAll('.tree-only').forEach(function(e){ e.classList.toggle('hide', t !== 'trees'); });
+  document.querySelectorAll('#tabs button').forEach(function(b){ b.className = b.dataset.t === t ? 'on' : 'alt'; });
+  if (t === 'snow') { map.removeLayer(treeLayer); map.addLayer(layer); }
+  else { map.removeLayer(layer); map.addLayer(treeLayer); }
+  setTimeout(function(){ map.invalidateSize(); }, 50);
+}
+document.querySelectorAll('#tabs button').forEach(function(b){ b.onclick = function(){ setTab(b.dataset.t); }; });
+$('tmap').onclick = mapTrees;
+$('rad').onchange = $('grid').onchange = function(){ if (center) load(center.lat, center.lon); };
+
+})();
+</script>
+</body>
+</html>
